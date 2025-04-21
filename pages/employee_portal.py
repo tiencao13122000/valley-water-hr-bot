@@ -109,45 +109,17 @@ import streamlit as st
 from openai import OpenAI
 
 def get_openai_client():
-    """Get an OpenAI client while avoiding the proxies issue"""
-    # Check different locations for the API key
-    api_key = None
-    
-    # Try various secret locations
+    """Get an OpenAI client using Streamlit secrets"""
     try:
-        if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
-            api_key = st.secrets['OPENAI_API_KEY']
-    except:
-        pass
+        # Get API key from Streamlit secrets
+        api_key = st.secrets["OPENAI_API_KEY"]
+        print(f"Successfully retrieved API key from secrets")
         
-    # Try environment variables as fallback
-    if not api_key:
-        api_key = os.environ.get("OPENAI_API_KEY")
-    
-    if not api_key:
-        st.error("OpenAI API key not found in secrets or environment variables")
-        return None
-    
-    # Now create a client without proxies
-    try:
-        # Import necessary modules
-        import httpx
-        from openai import OpenAI
-        
-        # Create a custom httpx client without proxies
-        http_client = httpx.Client(
-            base_url="https://api.openai.com/v1",
-            timeout=60.0
-        )
-        
-        # Create OpenAI client with our custom http client
-        return OpenAI(
-            api_key=api_key,
-            http_client=http_client
-        )
+        # Create OpenAI client
+        return OpenAI(api_key=api_key)
     except Exception as e:
-        print(f"Error creating OpenAI client: {e}")
-        st.error(f"Unable to initialize OpenAI client: {str(e)}")
+        print(f"Error initializing OpenAI client: {e}")
+        st.error("Unable to access OpenAI API. Please check your API key configuration.")
         return None
 # Resource links database
 RESOURCE_LINKS = {
