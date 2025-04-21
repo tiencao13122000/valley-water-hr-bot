@@ -109,76 +109,72 @@ import streamlit as st
 from openai import OpenAI
 
 def get_openai_client():
-    """Get an OpenAI client with error handling for proxy issues"""
-    # Get API key from environment or secrets
-    api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("openai_api_key", "")
+    """Get an OpenAI client with improved error handling for deployments"""
+    # Check different possible locations for the API key
+    api_key = None
     
+    # Try to get from Streamlit secrets (first format)
+    try:
+        api_key = st.secrets.get("openai.api_key")
+        if api_key:
+            print("Found API key in st.secrets.openai.api_key")
+    except:
+        pass
+    
+    # Try to get from Streamlit secrets (second format)
     if not api_key:
-        st.warning("OpenAI API key not found. Chatbot functionality will be limited.")
-        # Replace with your actual OpenAI API key
-        api_key = "your_openai_api_key_here"
+        try:
+            api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets["OPENAI_API_KEY"]
+            if api_key:
+                print("Found API key in st.secrets.OPENAI_API_KEY")
+        except:
+            pass
     
-    print(f"✅ Using OpenAI key starting with: {api_key[:8]}...")
+    # Try to get from environment variable
+    if not api_key:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            print("Found API key in environment variable")
+    
+    # Fallback to hardcoded key if needed
+    if not api_key:
+        st.warning("OpenAI API key not found in secrets or environment. Using fallback key.")
+    
+    print(f"Using API key starting with: {api_key[:10]}...")
     
     try:
-        # Try importing OpenAI modules directly
-        from openai import OpenAI
-        
-        # Create a monkey patched version of the SyncHttpxClientWrapper
-        import httpx
-        from openai._base_client import SyncHttpxClientWrapper
-        
-        # Store the original init method
-        original_init = httpx.Client.__init__
-        
-        # Define patched init to filter out proxies
-        def patched_init(self, *args, **kwargs):
-            # Remove proxies if present
-            if 'proxies' in kwargs:
-                del kwargs['proxies']
-            return original_init(self, *args, **kwargs)
-        
-        # Apply monkey patch
-        httpx.Client.__init__ = patched_init
-        
-        # Create client
-        client = OpenAI(api_key=api_key)
-        
-        # Restore original
-        httpx.Client.__init__ = original_init
-        
-        return client
+        # Try simplest initialization first
+        return OpenAI(api_key=api_key)
     except Exception as e:
-        # Fallback to simplest possible initialization
         print(f"Error creating OpenAI client: {e}")
-        print("Trying simplified client initialization...")
         
         try:
-            return OpenAI(api_key=api_key)
+            # Try with explicit parameters
+            return OpenAI(
+                api_key=api_key,
+                base_url="https://api.openai.com/v1"
+            )
         except Exception as e2:
-            print(f"Failed to create OpenAI client: {e2}")
+            print(f"Failed with explicit parameters: {e2}")
+            st.error(f"Unable to initialize OpenAI client. Error: {str(e2)}")
             
-            # Return a mock client as last resort
-            print("Using mock client for development")
+            # Return a simple mock client as last resort
             class MockClient:
                 def __init__(self):
                     self.chat = self
-                    
                 def completions(self):
                     return self
-                    
-                def create(self, model=None, messages=None, temperature=None, max_tokens=None, **kwargs):
+                def create(self, **kwargs):
                     class MockResponse:
                         def __init__(self):
                             class MockChoice:
                                 def __init__(self):
                                     class MockMessage:
                                         def __init__(self):
-                                            self.content = "I'm sorry, but I can't access the OpenAI API right now. Please check your API key or try again later."
+                                            self.content = "I'm sorry, I encountered an error accessing the OpenAI API."
                                     self.message = MockMessage()
                             self.choices = [MockChoice()]
                     return MockResponse()
-            
             return MockClient()
 
 # Resource links database
