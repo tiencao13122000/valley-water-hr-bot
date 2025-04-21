@@ -8,6 +8,33 @@ from openai import OpenAI
 from utils.user_auth import login_required, logout_user
 from utils.pdf_processor import PDFProcessor
 from utils.db_manager import DBManager
+You can add the debug information code at the beginning of your employee_portal.py file, right after your imports and before you define any functions.
+Here's where to place it:
+pythonimport streamlit as st
+import os
+import time
+import re
+from datetime import datetime
+import json
+from openai import OpenAI
+from utils.user_auth import login_required, logout_user
+from utils.pdf_processor import PDFProcessor
+from utils.db_manager import DBManager
+
+# debug code here
+st.write("Checking secrets configuration...")
+try:
+    # Try to access without using the value
+    has_key = "OPENAI_API_KEY" in st.secrets
+    st.write(f"OPENAI_API_KEY exists in secrets: {has_key}")
+    
+    # Only print the first and last few characters if it exists
+    if has_key:
+        key = st.secrets["OPENAI_API_KEY"]
+        masked_key = key[:5] + "..." + key[-5:] if len(key) > 10 else "Invalid format"
+        st.write(f"API key format: {masked_key}")
+except Exception as e:
+    st.write(f"Error accessing secrets: {type(e).__name__}: {str(e)}")
 
 # Custom CSS for styling
 st.markdown("""
@@ -109,18 +136,34 @@ import streamlit as st
 from openai import OpenAI
 
 def get_openai_client():
-    """Get an OpenAI client using Streamlit secrets"""
+    """Try multiple methods to get OpenAI API key"""
+    # Method 1: Direct access
     try:
-        # Get API key from Streamlit secrets
         api_key = st.secrets["OPENAI_API_KEY"]
-        print(f"Successfully retrieved API key from secrets")
-        
-        # Create OpenAI client
         return OpenAI(api_key=api_key)
-    except Exception as e:
-        print(f"Error initializing OpenAI client: {e}")
-        st.error("Unable to access OpenAI API. Please check your API key configuration.")
-        return None
+    except Exception as e1:
+        st.write(f"Method 1 failed: {str(e1)}")
+    
+    # Method 2: Dict-style access
+    try:
+        api_key = st.secrets.get("OPENAI_API_KEY")
+        return OpenAI(api_key=api_key)
+    except Exception as e2:
+        st.write(f"Method 2 failed: {str(e2)}")
+    
+    # Method 3: Try environment variable
+    try:
+        import os
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            return OpenAI(api_key=api_key)
+        else:
+            st.write("No API key in environment variables")
+    except Exception as e3:
+        st.write(f"Method 3 failed: {str(e3)}")
+    
+    st.error("All methods to access OpenAI API key failed")
+    return None
 # Resource links database
 RESOURCE_LINKS = {
     # Benefits
