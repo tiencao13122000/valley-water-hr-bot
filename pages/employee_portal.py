@@ -8,18 +8,6 @@ from openai import OpenAI
 from utils.user_auth import login_required, logout_user
 from utils.pdf_processor import PDFProcessor
 from utils.db_manager import DBManager
-You can add the debug information code at the beginning of your employee_portal.py file, right after your imports and before you define any functions.
-Here's where to place it:
-pythonimport streamlit as st
-import os
-import time
-import re
-from datetime import datetime
-import json
-from openai import OpenAI
-from utils.user_auth import login_required, logout_user
-from utils.pdf_processor import PDFProcessor
-from utils.db_manager import DBManager
 
 # debug code here
 st.write("Checking secrets configuration...")
