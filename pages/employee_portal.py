@@ -136,11 +136,15 @@ def get_openai_client():
         if api_key:
             print("Found API key in environment variable")
     
-    # Fallback to hardcoded key if needed
+    # Handle missing key
     if not api_key:
-        st.warning("OpenAI API key not found in secrets or environment. Using fallback key.")
+        st.error("OpenAI API key not found. Please add it to Streamlit secrets or environment variables.")
+        return None
     
-    print(f"Using API key starting with: {api_key[:10]}...")
+    # Only print the first few characters for debugging
+    if api_key:
+        masked_key = api_key[:4] + "..." + api_key[-4:]
+        print(f"Using API key: {masked_key}")
     
     try:
         # Try simplest initialization first
@@ -157,25 +161,7 @@ def get_openai_client():
         except Exception as e2:
             print(f"Failed with explicit parameters: {e2}")
             st.error(f"Unable to initialize OpenAI client. Error: {str(e2)}")
-            
-            # Return a simple mock client as last resort
-            class MockClient:
-                def __init__(self):
-                    self.chat = self
-                def completions(self):
-                    return self
-                def create(self, **kwargs):
-                    class MockResponse:
-                        def __init__(self):
-                            class MockChoice:
-                                def __init__(self):
-                                    class MockMessage:
-                                        def __init__(self):
-                                            self.content = "I'm sorry, I encountered an error accessing the OpenAI API."
-                                    self.message = MockMessage()
-                            self.choices = [MockChoice()]
-                    return MockResponse()
-            return MockClient()
+            return None
 
 # Resource links database
 RESOURCE_LINKS = {
