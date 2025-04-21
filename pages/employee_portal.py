@@ -124,34 +124,59 @@ import streamlit as st
 from openai import OpenAI
 
 def get_openai_client():
-    """Try multiple methods to get OpenAI API key"""
-    # Method 1: Direct access
-    try:
-        api_key = st.secrets["OPENAI_API_KEY"]
-        return OpenAI(api_key=api_key)
-    except Exception as e1:
-        st.write(f"Method 1 failed: {str(e1)}")
+    """Get an OpenAI client with improved error handling for deployments"""
+    # Check different possible locations for the API key
+    api_key = None
     
-    # Method 2: Dict-style access
+    # Try to get from Streamlit secrets (first format)
     try:
-        api_key = st.secrets.get("OPENAI_API_KEY")
-        return OpenAI(api_key=api_key)
-    except Exception as e2:
-        st.write(f"Method 2 failed: {str(e2)}")
+        api_key = st.secrets.get("openai.api_key")
+        if api_key:
+            print("Found API key in st.secrets.openai.api_key")
+    except:
+        pass
     
-    # Method 3: Try environment variable
-    try:
-        import os
+    # Try to get from Streamlit secrets (second format)
+    if not api_key:
+        try:
+            api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets["OPENAI_API_KEY"]
+            if api_key:
+                print("Found API key in st.secrets.OPENAI_API_KEY")
+        except:
+            pass
+    
+    # Try to get from environment variable
+    if not api_key:
         api_key = os.environ.get("OPENAI_API_KEY")
         if api_key:
-            return OpenAI(api_key=api_key)
-        else:
-            st.write("No API key in environment variables")
-    except Exception as e3:
-        st.write(f"Method 3 failed: {str(e3)}")
+            print("Found API key in environment variable")
     
-    st.error("All methods to access OpenAI API key failed")
-    return None
+    # Handle missing key
+    if not api_key:
+        st.error("OpenAI API key not found. Please add it to Streamlit secrets or environment variables.")
+        return None
+    
+    # Only print the first few characters for debugging
+    if api_key:
+        masked_key = api_key[:4] + "..." + api_key[-4:]
+        print(f"Using API key: {masked_key}")
+    
+    try:
+        # Try simplest initialization first
+        return OpenAI(api_key=api_key)
+    except Exception as e:
+        print(f"Error creating OpenAI client: {e}")
+        
+        try:
+            # Try with explicit parameters
+            return OpenAI(
+                api_key=api_key,
+                base_url="https://api.openai.com/v1"
+            )
+        except Exception as e2:
+            print(f"Failed with explicit parameters: {e2}")
+            st.error(f"Unable to initialize OpenAI client. Error: {str(e2)}")
+            return None
 # Resource links database
 RESOURCE_LINKS = {
     # Benefits
