@@ -43,14 +43,25 @@ class ReportGenerator:
             topic = convo.get("topic", "Uncategorized")
             topics[topic] = topics.get(topic, 0) + 1
         
+        # Get conversation threads
+        conversation_threads = {}
+        for convo in conversations:
+            thread_id = convo.get("conversation_id")
+            if thread_id:
+                if thread_id not in conversation_threads:
+                    conversation_threads[thread_id] = []
+                conversation_threads[thread_id].append(convo)
+        
         # Prepare report data
         report = {
             "employee_id": employee_id,
             "employee_name": employee_name,
             "total_conversations": len(conversations),
+            "total_threads": len(conversation_threads),
             "report_date": datetime.now().strftime("%Y-%m-%d"),
             "topics": topics,
-            "conversations": conversations
+            "conversations": conversations,
+            "conversation_threads": conversation_threads
         }
         
         return report
@@ -64,7 +75,7 @@ class ReportGenerator:
         trends = self.db_manager.get_conversation_counts_by_date(days)
         
         # Get top employees by conversation count
-        top_employees = self.db_manager.get_conversation_counts_by_employee(limit=10)
+        top_employees = self.db_manager.get_thread_counts_by_employee(limit=10)
         
         # Get top topics
         top_topics = self.db_manager.get_top_topics(limit=10)
@@ -135,13 +146,13 @@ class ReportGenerator:
             x='day', 
             y='count', 
             title='Conversations Over Time',
-            labels={'day': 'Date', 'count': 'Number of Conversations'},
+            labels={'day': 'Date', 'count': 'Number of Messages'},
             markers=True
         )
         
         fig.update_layout(
             xaxis_title="Date",
-            yaxis_title="Number of Conversations",
+            yaxis_title="Number of Messages",
             hovermode="x unified"
         )
         
@@ -175,29 +186,44 @@ class ReportGenerator:
     def plot_employee_activity(self, employee_data=None):
         """Generate a plot of conversation activity by employee"""
         if employee_data is None:
-            # Get employee data from database
-            employee_data = self.db_manager.get_conversation_counts_by_employee()
+            # Get employee data from database - use thread counts
+            employee_data = self.db_manager.get_thread_counts_by_employee()
             
         if not employee_data:
             return None
         
         # Convert to DataFrame
-        df = pd.DataFrame(employee_data)
+        df = pd.DataFrame([
+            {
+                'employee_name': e['employee_name'],
+                'threads': e['thread_count'],
+                'messages': e['message_count']
+            } 
+            for e in employee_data
+        ])
         
-        # Create plotly figure
-        fig = px.bar(
-            df,
-            x='employee_name',
-            y='count',
-            title='Conversations by Employee',
-            labels={'employee_name': 'Employee', 'count': 'Number of Conversations'},
-            color='count',
-            color_continuous_scale=px.colors.sequential.Viridis
-        )
+        # Create plotly figure - bar chart with two bars per employee
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            x=df['employee_name'],
+            y=df['threads'],
+            name='Conversation Threads',
+            marker_color='#0078D7'
+        ))
+        
+        fig.add_trace(go.Bar(
+            x=df['employee_name'],
+            y=df['messages'],
+            name='Total Messages',
+            marker_color='#83c7ff'
+        ))
         
         fig.update_layout(
+            title='Employee Conversation Activity',
             xaxis_title="Employee",
-            yaxis_title="Number of Conversations",
+            yaxis_title="Count",
+            barmode='group',
             xaxis={'categoryorder':'total descending'}
         )
         
@@ -214,7 +240,12 @@ class ReportGenerator:
         
         # Display employee info
         st.subheader(f"Report for: {report['employee_name']} ({report['employee_id']})")
-        st.write(f"Total conversations: {report['total_conversations']}")
+        
+        # Display key metrics
+        col1, col2 = st.columns(2)
+        col1.metric("Total Messages", report["total_conversations"])
+        col2.metric("Conversation Threads", report["total_threads"])
+        
         st.write(f"Report generated on: {report['report_date']}")
         
         # Display topics chart if there are topics
@@ -225,14 +256,41 @@ class ReportGenerator:
             if fig:
                 st.plotly_chart(fig, use_container_width=True)
         
-        # Display conversations
-        st.subheader("Conversation History")
-        for i, convo in enumerate(report["conversations"]):
-            with st.expander(f"Conversation {i+1}: {convo['date_time']} - {convo.get('topic', 'No topic')}"):
-                st.write(f"**Question**: {convo['question']}")
-                st.write(f"**Answer**: {convo['answer']}")
-                if convo.get('summary'):
-                    st.write(f"**Summary**: {convo['summary']}")
+        # Display conversation threads
+        st.subheader("Conversation Threads")
+        
+        # Sort threads by date (newest first)
+        sorted_threads = sorted(
+            report["conversation_threads"].items(),
+            key=lambda x: max(msg["date_time"] for msg in x[1]) if x[1] else "",
+            reverse=True
+        )
+        
+        for thread_id, messages in sorted_threads:
+            if not messages:
+                continue
+                
+            # Get thread stats
+            start_time = min(msg["date_time"] for msg in messages)
+            end_time = max(msg["date_time"] for msg in messages)
+            primary_topic = max(
+                set(msg.get("topic", "Uncategorized") for msg in messages),
+                key=lambda t: sum(1 for msg in messages if msg.get("topic") == t)
+            )
+            
+            # Create expander for each thread
+            with st.expander(f"Thread from {start_time} - {len(messages)} messages - Topic: {primary_topic}"):
+                # Sort messages by datetime
+                sorted_messages = sorted(messages, key=lambda x: x["date_time"])
+                
+                # Display each message
+                for i, msg in enumerate(sorted_messages):
+                    st.write(f"**Time:** {msg['date_time']}")
+                    st.write(f"**Question:** {msg['question']}")
+                    st.write(f"**Answer:** {msg['answer']}")
+                    
+                    if i < len(sorted_messages) - 1:
+                        st.divider()
         
         # Export options
         st.subheader("Export Options")
@@ -269,11 +327,12 @@ class ReportGenerator:
         st.subheader("Overall Statistics")
         stats = report["statistics"]
         
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Conversations", stats["total_conversations"])
-        col2.metric("Unique Employees", stats["unique_employees"])
-        col3.metric("Last 7 Days", stats["conversations_last_7_days"])
-        col4.metric("Avg Answer Length", f"{int(stats['avg_answer_length'])} chars")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Total Messages", stats["total_conversations"])
+        col2.metric("Conversation Threads", stats["conversation_threads"])
+        col3.metric("Unique Employees", stats["unique_employees"])
+        col4.metric("Last 7 Days", stats["conversations_last_7_days"])
+        col5.metric("Avg Answer Length", f"{int(stats['avg_answer_length'])} chars")
         
         # Display trends chart
         st.subheader("Conversation Trends")
@@ -318,16 +377,3 @@ class ReportGenerator:
                         file_name=os.path.basename(json_path),
                         mime="application/json"
                     )
-
-# Example usage
-if __name__ == "__main__":
-    # Initialize the report generator
-    report_gen = ReportGenerator()
-    
-    # Test generating an employee report
-    employee_report = report_gen.generate_employee_report("test")
-    print(f"Generated employee report with {employee_report['total_conversations']} conversations")
-    
-    # Test generating an admin report
-    admin_report = report_gen.generate_admin_report()
-    print(f"Generated admin report with trends for {len(admin_report['trends'])} days")
