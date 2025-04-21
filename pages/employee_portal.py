@@ -104,17 +104,21 @@ pdf_processor = PDFProcessor()
 db_manager = DBManager()
 
 # Initialize OpenAI client
+import os
+import streamlit as st
+from openai import OpenAI
+
 def get_openai_client():
-    # Get API key from environment or secrets
-    api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("openai_api_key", "")
-    
+    # Try getting key from env, then Streamlit secrets
+    api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", "")
+
     if not api_key:
-        st.warning("OpenAI API key not found. Chatbot functionality will be limited.")
-        # Replace with your actual OpenAI API key
-        api_key = "your_openai_api_key_here"  
-    # Print the first few characters of the key being used (for debugging)
-    print(f"Using API key starting with: {api_key[:8]}...")
-    
+        st.error("🚫 OpenAI API key not found. Please set it in Streamlit secrets or environment variables.")
+        st.stop()  # stops the app from continuing
+
+    # Optional: print first few characters (for debugging)
+    print(f"✅ Using OpenAI key starting with: {api_key[:8]}...")
+
     return OpenAI(api_key=api_key)
 
 # Resource links database
