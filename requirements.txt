@@ -9,4 +9,3 @@ matplotlib==3.8.0
 plotly==5.18.0
 numpy==1.26.0
 python-dotenv==1.0.0
-uuid==1.30
