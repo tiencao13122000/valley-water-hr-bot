@@ -109,17 +109,77 @@ import streamlit as st
 from openai import OpenAI
 
 def get_openai_client():
-    # Try getting key from env, then Streamlit secrets
-    api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", "")
-
+    """Get an OpenAI client with error handling for proxy issues"""
+    # Get API key from environment or secrets
+    api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("openai_api_key", "")
+    
     if not api_key:
-        st.error("🚫 OpenAI API key not found. Please set it in Streamlit secrets or environment variables.")
-        st.stop()  # stops the app from continuing
-
-    # Optional: print first few characters (for debugging)
+        st.warning("OpenAI API key not found. Chatbot functionality will be limited.")
+        # Replace with your actual OpenAI API key
+        api_key = "your_openai_api_key_here"
+    
     print(f"✅ Using OpenAI key starting with: {api_key[:8]}...")
-
-    return OpenAI(api_key=api_key)
+    
+    try:
+        # Try importing OpenAI modules directly
+        from openai import OpenAI
+        
+        # Create a monkey patched version of the SyncHttpxClientWrapper
+        import httpx
+        from openai._base_client import SyncHttpxClientWrapper
+        
+        # Store the original init method
+        original_init = httpx.Client.__init__
+        
+        # Define patched init to filter out proxies
+        def patched_init(self, *args, **kwargs):
+            # Remove proxies if present
+            if 'proxies' in kwargs:
+                del kwargs['proxies']
+            return original_init(self, *args, **kwargs)
+        
+        # Apply monkey patch
+        httpx.Client.__init__ = patched_init
+        
+        # Create client
+        client = OpenAI(api_key=api_key)
+        
+        # Restore original
+        httpx.Client.__init__ = original_init
+        
+        return client
+    except Exception as e:
+        # Fallback to simplest possible initialization
+        print(f"Error creating OpenAI client: {e}")
+        print("Trying simplified client initialization...")
+        
+        try:
+            return OpenAI(api_key=api_key)
+        except Exception as e2:
+            print(f"Failed to create OpenAI client: {e2}")
+            
+            # Return a mock client as last resort
+            print("Using mock client for development")
+            class MockClient:
+                def __init__(self):
+                    self.chat = self
+                    
+                def completions(self):
+                    return self
+                    
+                def create(self, model=None, messages=None, temperature=None, max_tokens=None, **kwargs):
+                    class MockResponse:
+                        def __init__(self):
+                            class MockChoice:
+                                def __init__(self):
+                                    class MockMessage:
+                                        def __init__(self):
+                                            self.content = "I'm sorry, but I can't access the OpenAI API right now. Please check your API key or try again later."
+                                    self.message = MockMessage()
+                            self.choices = [MockChoice()]
+                    return MockResponse()
+            
+            return MockClient()
 
 # Resource links database
 RESOURCE_LINKS = {
