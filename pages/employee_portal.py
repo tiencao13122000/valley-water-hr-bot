@@ -109,60 +109,46 @@ import streamlit as st
 from openai import OpenAI
 
 def get_openai_client():
-    """Get an OpenAI client with improved error handling for deployments"""
-    # Check different possible locations for the API key
+    """Get an OpenAI client while avoiding the proxies issue"""
+    # Check different locations for the API key
     api_key = None
     
-    # Try to get from Streamlit secrets (first format)
+    # Try various secret locations
     try:
-        api_key = st.secrets.get("openai.api_key")
-        if api_key:
-            print("Found API key in st.secrets.openai.api_key")
+        if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+            api_key = st.secrets['OPENAI_API_KEY']
     except:
         pass
-    
-    # Try to get from Streamlit secrets (second format)
-    if not api_key:
-        try:
-            api_key = st.secrets.get("OPENAI_API_KEY") or st.secrets["OPENAI_API_KEY"]
-            if api_key:
-                print("Found API key in st.secrets.OPENAI_API_KEY")
-        except:
-            pass
-    
-    # Try to get from environment variable
+        
+    # Try environment variables as fallback
     if not api_key:
         api_key = os.environ.get("OPENAI_API_KEY")
-        if api_key:
-            print("Found API key in environment variable")
     
-    # Handle missing key
     if not api_key:
-        st.error("OpenAI API key not found. Please add it to Streamlit secrets or environment variables.")
+        st.error("OpenAI API key not found in secrets or environment variables")
         return None
     
-    # Only print the first few characters for debugging
-    if api_key:
-        masked_key = api_key[:4] + "..." + api_key[-4:]
-        print(f"Using API key: {masked_key}")
-    
+    # Now create a client without proxies
     try:
-        # Try simplest initialization first
-        return OpenAI(api_key=api_key)
+        # Import necessary modules
+        import httpx
+        from openai import OpenAI
+        
+        # Create a custom httpx client without proxies
+        http_client = httpx.Client(
+            base_url="https://api.openai.com/v1",
+            timeout=60.0
+        )
+        
+        # Create OpenAI client with our custom http client
+        return OpenAI(
+            api_key=api_key,
+            http_client=http_client
+        )
     except Exception as e:
         print(f"Error creating OpenAI client: {e}")
-        
-        try:
-            # Try with explicit parameters
-            return OpenAI(
-                api_key=api_key,
-                base_url="https://api.openai.com/v1"
-            )
-        except Exception as e2:
-            print(f"Failed with explicit parameters: {e2}")
-            st.error(f"Unable to initialize OpenAI client. Error: {str(e2)}")
-            return None
-
+        st.error(f"Unable to initialize OpenAI client: {str(e)}")
+        return None
 # Resource links database
 RESOURCE_LINKS = {
     # Benefits
