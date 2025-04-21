@@ -104,7 +104,6 @@ pdf_processor = PDFProcessor()
 db_manager = DBManager()
 
 # Initialize OpenAI client
-@st.cache_resource
 def get_openai_client():
     # Get API key from environment or secrets
     api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("openai_api_key", "")
@@ -112,8 +111,10 @@ def get_openai_client():
     if not api_key:
         st.warning("OpenAI API key not found. Chatbot functionality will be limited.")
         # Replace with your actual OpenAI API key
-        api_key = "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"
-        
+        api_key = "your_openai_api_key_here"  
+    # Print the first few characters of the key being used (for debugging)
+    print(f"Using API key starting with: {api_key[:8]}...")
+    
     return OpenAI(api_key=api_key)
 
 # Resource links database
@@ -382,7 +383,7 @@ Important guidelines:
         {"role": "system", "content": system_message}
     ]
     
-    # Add relevant conversation history (last 5 exchanges max)
+    # Add relevant conversation history (last 10 exchanges max)
     for message in conversation_history[-10:]:
         messages.append(message)
     
@@ -459,14 +460,15 @@ Important guidelines:
         topic = classify_topic(question, answer)
         summary = generate_summary(question, answer)
         
-        # Step 7: Save the conversation to the database
+        # Step 7: Save the conversation to the database with conversation ID
         db_manager.save_conversation(
             employee_id=st.session_state.employee_id,
             employee_name=employee_data['name'],
             question=question,
             answer=answer,
             summary=summary,
-            topic=topic
+            topic=topic,
+            conversation_id=st.session_state.conversation_id
         )
         
         return {
@@ -489,6 +491,11 @@ Important guidelines:
 
 @login_required
 def main():
+    # Clear cached resources to ensure we use the latest API key
+    if 'first_load' not in st.session_state:
+        st.cache_resource.clear()
+        st.session_state.first_load = True
+    
     # Logout button
     if st.button("Logout", key="logout_btn", help="Logout from the HR portal"):
         logout_user()
@@ -508,6 +515,10 @@ def main():
             "How do I request time off?",
             "When is my next performance review?"
         ]
+    
+    # Initialize conversation ID if not exists
+    if "conversation_id" not in st.session_state:
+        st.session_state.conversation_id = f"{st.session_state.employee_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     
     # Sidebar with employee profile
     with st.sidebar:
@@ -543,6 +554,16 @@ def main():
         
         st.markdown("</div>", unsafe_allow_html=True)
         
+        # New conversation button
+        if st.button("Start New Conversation", key="new_conversation_btn"):
+            # Generate a new conversation ID
+            st.session_state.conversation_id = f"{st.session_state.employee_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            # Clear messages
+            st.session_state.messages = []
+            st.success("Started a new conversation thread!")
+            time.sleep(1)
+            st.rerun()
+        
         # PDF document management
         st.subheader("HR Documents")
         
@@ -550,7 +571,7 @@ def main():
         pdf_files = pdf_processor.get_available_pdfs()
         if pdf_files:
             selected_pdf = st.selectbox("Select a document:", pdf_files)
-            if st.button("Load Document"):
+            if st.button("Load Document", key="load_doc_btn"):
                 with st.spinner("Loading document..."):
                     content = pdf_processor.load_pdf_content(filename=selected_pdf)
                     st.session_state.pdf_content = content
@@ -561,7 +582,7 @@ def main():
         # Upload new PDF
         uploaded_file = st.file_uploader("Upload HR Document", type="pdf")
         if uploaded_file:
-            if st.button("Save & Load"):
+            if st.button("Save & Load", key="save_load_btn"):
                 with st.spinner("Processing document..."):
                     file_path = pdf_processor.save_uploaded_pdf(uploaded_file)
                     if file_path:
@@ -573,6 +594,9 @@ def main():
     
     # Main content area
     st.markdown("<h1 class='main-title'>Valley Water HR Assistant</h1>", unsafe_allow_html=True)
+    
+    # Debug info - can be removed in production
+    # st.caption(f"Conversation ID: {st.session_state.conversation_id}")
     
     # Welcome message on first load
     if not st.session_state.messages:
@@ -606,36 +630,18 @@ def main():
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
         st.write("**Suggested questions:**")
         
-        # Create columns for suggestion buttons
-        cols = st.columns(len(st.session_state.suggestions))
-        
-        # Add a button for each suggestion
-        for i, suggestion in enumerate(st.session_state.suggestions):
-            # Use a unique key with timestamp to avoid duplication
-            unique_key = f"sugg_{i}_{datetime.now().strftime('%H%M%S%f')}"
-            if cols[i].button(suggestion, key=unique_key):
-                # Add user message
-                st.session_state.messages.append({"role": "user", "content": suggestion})
-                
-                # Get chatbot response
-                with st.spinner("Thinking..."):
-                    # Format conversation history
-                    history = [
-                        {"role": msg["role"], "content": msg["content"]} 
-                        for msg in st.session_state.messages[:-1]  # Exclude the latest message
-                    ]
-                    
-                    # Get response
-                    response_data = get_chatbot_response(suggestion, history)
-                    
-                    # Add assistant response
-                    st.session_state.messages.append({"role": "assistant", "content": response_data["answer"]})
-                    
-                    # Update suggestions
-                    st.session_state.suggestions = response_data["suggestions"]
-                
-                # Rerun to update UI
-                st.rerun()
+        # Simple solution - use a single button for each suggestion
+        if st.button(st.session_state.suggestions[0], key=f"sugg_0"):
+            # Process the clicked suggestion
+            handle_suggestion_click(st.session_state.suggestions[0])
+            
+        if st.button(st.session_state.suggestions[1], key=f"sugg_1"):
+            # Process the clicked suggestion
+            handle_suggestion_click(st.session_state.suggestions[1])
+            
+        if st.button(st.session_state.suggestions[2], key=f"sugg_2"):
+            # Process the clicked suggestion
+            handle_suggestion_click(st.session_state.suggestions[2])
     
     # Input box for user messages
     user_input = st.chat_input("Ask your HR question here...")
@@ -666,6 +672,31 @@ def main():
     
     # Footer
     st.markdown("<div class='footer'>© 2025 Valley Water HR Assistant | Developed by Team Sapphire</div>", unsafe_allow_html=True)
+
+# Helper function to handle suggestion clicks
+def handle_suggestion_click(suggestion_text):
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": suggestion_text})
+    
+    # Get chatbot response
+    with st.spinner("Thinking..."):
+        # Format conversation history
+        history = [
+            {"role": msg["role"], "content": msg["content"]} 
+            for msg in st.session_state.messages[:-1]  # Exclude the latest message
+        ]
+        
+        # Get response
+        response_data = get_chatbot_response(suggestion_text, history)
+        
+        # Add assistant response
+        st.session_state.messages.append({"role": "assistant", "content": response_data["answer"]})
+        
+        # Update suggestions
+        st.session_state.suggestions = response_data["suggestions"]
+    
+    # Force a rerun to update the UI
+    st.rerun()
 
 if __name__ == "__main__":
     main()
