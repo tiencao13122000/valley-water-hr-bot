@@ -32,7 +32,7 @@ class DBManager:
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        # Create conversations table
+        # Create conversations table with conversation_id field
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +42,8 @@ class DBManager:
             answer TEXT NOT NULL,
             summary TEXT,
             topic TEXT,
-            date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            conversation_id TEXT
         )
         ''')
         
@@ -58,20 +59,24 @@ class DBManager:
         conn.commit()
         conn.close()
     
-    def save_conversation(self, employee_id, employee_name, question, answer, summary=None, topic=None):
-        """Save a conversation to the database"""
+    def save_conversation(self, employee_id, employee_name, question, answer, summary=None, topic=None, conversation_id=None):
+        """Save a conversation to the database with conversation grouping"""
         conn = self._get_connection()
         cursor = conn.cursor()
         
         # Current timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        # If no conversation_id provided, create one based on employee_id and timestamp
+        if not conversation_id:
+            conversation_id = f"{employee_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
         # Insert the conversation
         cursor.execute('''
         INSERT INTO conversations 
-        (employee_id, employee_name, question, answer, summary, topic, date_time) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (employee_id, employee_name, question, answer, summary, topic, timestamp))
+        (employee_id, employee_name, question, answer, summary, topic, date_time, conversation_id) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (employee_id, employee_name, question, answer, summary, topic, timestamp, conversation_id))
         
         # Update topic statistics if topic is provided
         if topic:
@@ -134,6 +139,48 @@ class DBManager:
         
         return dict(result) if result else None
     
+    def get_conversation_thread(self, conversation_id):
+        """Get all messages in a conversation thread"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT * FROM conversations
+        WHERE conversation_id = ?
+        ORDER BY date_time ASC
+        ''', (conversation_id,))
+        
+        results = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return results
+    
+    def get_conversation_threads(self, limit=1000):
+        """Get conversations grouped by conversation thread"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT 
+            MIN(id) as first_id,
+            conversation_id,
+            employee_id,
+            employee_name,
+            MIN(date_time) as start_time,
+            MAX(date_time) as end_time,
+            COUNT(*) as message_count,
+            topic
+        FROM conversations
+        GROUP BY conversation_id
+        ORDER BY start_time DESC
+        LIMIT ?
+        ''', (limit,))
+        
+        results = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return results
+        
     def get_top_topics(self, limit=10):
         """Get most common conversation topics"""
         conn = self._get_connection()
@@ -183,6 +230,28 @@ class DBManager:
         FROM conversations
         GROUP BY employee_id
         ORDER BY count DESC
+        LIMIT ?
+        ''', (limit,))
+        
+        results = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return results
+    
+    def get_thread_counts_by_employee(self, limit=10):
+        """Get conversation thread counts grouped by employee"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT 
+            employee_id,
+            employee_name,
+            COUNT(DISTINCT conversation_id) as thread_count,
+            COUNT(*) as message_count
+        FROM conversations
+        GROUP BY employee_id
+        ORDER BY thread_count DESC
         LIMIT ?
         ''', (limit,))
         
@@ -261,13 +330,18 @@ class DBManager:
         cursor.execute("SELECT AVG(length(answer)) as avg_length FROM conversations")
         avg_answer_length = cursor.fetchone()['avg_length']
         
+        # Total conversation threads
+        cursor.execute("SELECT COUNT(DISTINCT conversation_id) as thread_count FROM conversations")
+        thread_count = cursor.fetchone()['thread_count']
+        
         conn.close()
         
         return {
             "total_conversations": total,
             "unique_employees": unique_employees,
             "conversations_last_7_days": recent,
-            "avg_answer_length": avg_answer_length
+            "avg_answer_length": avg_answer_length,
+            "conversation_threads": thread_count
         }
     
     def delete_conversation(self, conversation_id):
@@ -288,6 +362,40 @@ class DBManager:
         
         # Delete the conversation
         cursor.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        
+        rows_affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return rows_affected > 0
+    
+    def delete_conversation_thread(self, thread_id):
+        """Delete an entire conversation thread (admin function)"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # Get all topics in the thread to update topic counts
+        cursor.execute("SELECT DISTINCT topic FROM conversations WHERE conversation_id = ?", (thread_id,))
+        topics = cursor.fetchall()
+        
+        for topic_row in topics:
+            if topic_row['topic']:
+                # Count how many of this topic are in the thread
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM conversations WHERE conversation_id = ? AND topic = ?", 
+                    (thread_id, topic_row['topic'])
+                )
+                count = cursor.fetchone()['count']
+                
+                # Decrement topic count by the number found
+                if count > 0:
+                    cursor.execute(
+                        "UPDATE topics SET count = count - ? WHERE name = ? AND count >= ?", 
+                        (count, topic_row['topic'], count)
+                    )
+        
+        # Delete all conversations in the thread
+        cursor.execute("DELETE FROM conversations WHERE conversation_id = ?", (thread_id,))
         
         rows_affected = cursor.rowcount
         conn.commit()
@@ -339,29 +447,3 @@ class DBManager:
         
         conn.close()
         return success
-
-# Example usage
-if __name__ == "__main__":
-    # Initialize the database manager
-    db = DBManager()
-    
-    # Test saving a conversation
-    conversation_id = db.save_conversation(
-        employee_id="test",
-        employee_name="Test User",
-        question="How much PTO do I have?",
-        answer="You currently have 15 days of PTO available.",
-        summary="PTO balance inquiry",
-        topic="Benefits"
-    )
-    
-    print(f"Saved conversation with ID: {conversation_id}")
-    
-    # Test retrieving the conversation
-    conversation = db.get_conversation_by_id(conversation_id)
-    if conversation:
-        print(f"Retrieved: {conversation['question']} - {conversation['answer']}")
-    
-    # Get overall stats
-    stats = db.get_conversation_stats()
-    print(f"Database stats: {stats}")
